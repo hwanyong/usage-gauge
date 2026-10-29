@@ -1,0 +1,8 @@
+{
+  "name": "usage-gauge",
+  "version": "0.1.0",
+  "description": "Session and weekly rate-limit gauges above the prompt, with a linear pace marker",
+  "author": { "name": "hwanyong" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
