@@ -1,5 +1,6 @@
 {
   "name": "usage-gauge",
+  "description": "Session and weekly rate-limit gauges above the prompt, with a linear pace marker",
   "owner": { "name": "hwanyong" },
   "plugins": [{ "name": "usage-gauge", "source": "./" }]
 }
