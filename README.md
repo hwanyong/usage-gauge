@@ -12,7 +12,13 @@ Each gauge shows:
 
 The fill is `success` while usage is at or under the target, `warning` above it, and `error` from 90%.
 
-Values come from `$.session.usage()` at session start and from `session.measure` events afterwards (each turn, and whenever a window moves a whole point). The reset countdown and the target are recomputed every 60 seconds.
+Each session reads the values the API reported on its own last response: `$.session.usage()` at session start and every 60 seconds, and each `session.measure` event (each turn, and whenever a window moves a whole point). The sessions share their readings through the plugin's store, so every session draws the newest one: for each window, the reading with the later `resetsAt`, or within one window the higher `percentUsed`. The reset countdown and the target are recomputed every 60 seconds.
+
+Once a window's `resetsAt` has passed and no session has read the new window yet, the gauge shows `-% / 100%` and `Reset · waiting for the next response`.
+
+## Command
+
+- `/usage-gauge refresh` reads the values again at once, merges them with the other sessions' readings and prints them. It sends no API request: the values change only when some session receives a response.
 
 ## Install
 
@@ -33,7 +39,7 @@ In the desktop app: click + next to the prompt box, then Plugins, Add marketplac
 ## Limits
 
 - Rate limits exist only on a Claude subscription. With an API key, Bedrock or Vertex, `rateLimits` is empty and the band is not drawn.
-- The band appears after the session's first API response.
+- The band appears once any session has a reading: at once when an earlier session stored one, otherwise after this session's first API response.
 - Per-model weekly windows (such as the one `/usage` lists by model name) are not exposed to mods, so they are not shown.
 - The band draws on the terminal and desktop surfaces only.
 

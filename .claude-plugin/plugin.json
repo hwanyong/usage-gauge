@@ -1,6 +1,6 @@
 {
   "name": "usage-gauge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Session and weekly rate-limit gauges above the prompt, with a linear pace marker",
   "author": { "name": "hwanyong" },
   "license": "MIT",
