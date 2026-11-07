@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Color, EngineInterface, Register } from 'claude-code'
 
 import type { Limit } from '../types'
+import { readPlacement } from './pane-grid'
 
 const limits = atom({ plugin: 'usage-gauge', key: 'limits' } as const, [])
 const now = atom({ plugin: 'usage-gauge', key: 'now' } as const, 0)
@@ -13,6 +14,10 @@ const WINDOWS: Record<string, { label: string; span: string; ms: number }> = {
 }
 const TICK_MS = 60 * 1000
 const COMMAND = 'usage-gauge'
+const NAME = 'usage-gauge'
+const GAP = 3
+// 칸이 이보다 좁으면 게이지를 좌우로 놓지 않고 위아래로 쌓는다.
+const MIN_COLUMN_WIDTH = 24
 // The newest reading of every session, in this plugin's store, so each session draws the same values.
 const STORE_KEY = 'limits'
 
@@ -99,6 +104,64 @@ const barRuns = (width: number, used: number, target: number | undefined) => {
   return runs
 }
 
+type Shown = { limit: Limit; window: { label: string; span: string; ms: number } }
+
+const shownLimits = async ($: EngineInterface): Promise<Shown[]> => (await read($, limits)).flatMap(limit => {
+  const window = WINDOWS[limit.kind]
+  return window ? [{ limit, window }] : []
+})
+
+// band 와 grid 칸이 함께 쓰는 그리기 함수. `columns` 는 그릴 너비다.
+const drawGauges = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], shown: Shown[], columns: number) => {
+  const nowMs = (await read($, now)) || (await $.clock.now())
+  const { Box, Text } = $.ui.resolve(e)
+  const sideBySide = Math.floor((columns - GAP * (shown.length - 1)) / shown.length)
+  const isRow = sideBySide >= MIN_COLUMN_WIDTH
+  const columnWidth = isRow ? sideBySide : columns
+
+  return (
+    <Box flexDirection={isRow ? 'row' : 'column'} columnGap={GAP}>
+      {shown.map(({ limit, window }) => {
+        if (isExpired(limit, nowMs)) {
+          return (
+            <Box key={limit.kind} flexDirection="column" width={columnWidth}>
+              <Box flexDirection="row" justifyContent="space-between">
+                <Text bold>{window.label} <Text dimColor>{window.span}</Text></Text>
+                <Text dimColor bold>-% / 100%</Text>
+              </Box>
+              <Text color="subtle">{'░'.repeat(columnWidth)}</Text>
+              <Text dimColor>Reset · waiting for the next response</Text>
+            </Box>
+          )
+        }
+        const target = targetPercent(limit, nowMs)
+        const color = usedColor(limit.percentUsed, target)
+        const targetText = target == undefined ? '' : ` · target ${Math.round(target)}%`
+        return (
+          <Box key={limit.kind} flexDirection="column" width={columnWidth}>
+            <Box flexDirection="row" justifyContent="space-between">
+              <Text bold>{window.label} <Text dimColor>{window.span}</Text></Text>
+              <Text color={color} bold>{limit.percentUsed}% / 100%</Text>
+            </Box>
+            <Text>
+              {barRuns(columnWidth, limit.percentUsed, target).map((run, index) => (
+                <Text
+                  key={`${run.kind}-${index}`}
+                  color={run.kind == 'used' ? color : run.kind == 'target' ? 'text' : 'subtle'}
+                  bold={run.kind == 'target'}
+                >
+                  {run.text}
+                </Text>
+              ))}
+            </Text>
+            <Text dimColor>{resetsIn(limit.resetsAt, nowMs)}{targetText}</Text>
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -137,56 +200,27 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const shown = (await read($, limits)).flatMap(limit => {
-      const window = WINDOWS[limit.kind]
-      return window ? [{ limit, window }] : []
-    })
+    // pane-grid 의 칸에 넣었으면 band 에는 그리지 않는다(규약 결정 6).
+    if (await readPlacement($, NAME)) return next(e)
+    const shown = await shownLimits($)
     if (e.props.hasSurvey || shown.length == 0) return next(e)
+    return drawGauges($, e, shown, e.props.bodyColumns)
+  })
 
-    const nowMs = (await read($, now)) || (await $.clock.now())
+  // pane-grid 의 grid pane 에 자기 칸이 있으면 `cell:<이름>` Box 를 덧붙인다(규약 §3.3).
+  on('ui.render', { component: 'Pane', requestId: /^grid-/ }, async ($, e, next) => {
+    const placement = await readPlacement($, NAME)
+    if (!placement || placement.requestId != e.requestId) return next(e)
+    const below = await next(e)
+    const shown = await shownLimits($)
     const { Box, Text } = $.ui.resolve(e)
-    const gap = 3
-    const columnWidth = Math.floor((e.props.bodyColumns - gap * (shown.length - 1)) / shown.length)
-
+    const columns = placement.columns > 0 ? placement.columns : e.props.bodyColumns
     return (
-      <Box flexDirection="row" columnGap={gap}>
-        {shown.map(({ limit, window }) => {
-          if (isExpired(limit, nowMs)) {
-            return (
-              <Box key={limit.kind} flexDirection="column" width={columnWidth}>
-                <Box flexDirection="row" justifyContent="space-between">
-                  <Text bold>{window.label} <Text dimColor>{window.span}</Text></Text>
-                  <Text dimColor bold>-% / 100%</Text>
-                </Box>
-                <Text color="subtle">{'░'.repeat(columnWidth)}</Text>
-                <Text dimColor>Reset · waiting for the next response</Text>
-              </Box>
-            )
-          }
-          const target = targetPercent(limit, nowMs)
-          const color = usedColor(limit.percentUsed, target)
-          const targetText = target == undefined ? '' : ` · target ${Math.round(target)}%`
-          return (
-            <Box key={limit.kind} flexDirection="column" width={columnWidth}>
-              <Box flexDirection="row" justifyContent="space-between">
-                <Text bold>{window.label} <Text dimColor>{window.span}</Text></Text>
-                <Text color={color} bold>{limit.percentUsed}% / 100%</Text>
-              </Box>
-              <Text>
-                {barRuns(columnWidth, limit.percentUsed, target).map((run, index) => (
-                  <Text
-                    key={`${run.kind}-${index}`}
-                    color={run.kind == 'used' ? color : run.kind == 'target' ? 'text' : 'subtle'}
-                    bold={run.kind == 'target'}
-                  >
-                    {run.text}
-                  </Text>
-                ))}
-              </Text>
-              <Text dimColor>{resetsIn(limit.resetsAt, nowMs)}{targetText}</Text>
-            </Box>
-          )
-        })}
+      <Box flexDirection="column">
+        {below}
+        <Box key={`cell:${NAME}`} flexDirection="column">
+          {shown.length == 0 ? <Text dimColor>No rate-limit reading yet.</Text> : await drawGauges($, e, shown, columns)}
+        </Box>
       </Box>
     )
   })
