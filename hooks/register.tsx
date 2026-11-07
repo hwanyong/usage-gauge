@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Color, EngineInterface, Register } from 'claude-code'
 
 import type { Limit } from '../types'
-import { readPlacement } from './pane-grid'
+import { fillSlot, offerChoice, readPlacement } from './pane-grid'
 
 const limits = atom({ plugin: 'usage-gauge', key: 'limits' } as const, [])
 const now = atom({ plugin: 'usage-gauge', key: 'now' } as const, 0)
@@ -207,21 +207,21 @@ export const register: Register = on => {
     return drawGauges($, e, shown, e.props.bodyColumns)
   })
 
-  // pane-grid 의 grid pane 에 자기 칸이 있으면 `cell:<이름>` Box 를 덧붙인다(규약 §3.3).
+  // pane-grid 의 grid pane: 빈 칸의 선택지에 이 mod 의 Button 을 더하고, 자기 칸이 이 pane 에 있으면 그 칸을 그린다(규약 §3.3 · §3.5).
+  // pane-grid 보다 먼저 로드되면 fillSlot 이 pane-grid 가 그린 slot 을 채우고, 뒤에 로드되면 `cell:<이름>` Box 를 next(e) 뒤에 덧붙인다.
   on('ui.render', { component: 'Pane', requestId: /^grid-/ }, async ($, e, next) => {
     const placement = await readPlacement($, NAME)
-    if (!placement || placement.requestId != e.requestId) return next(e)
     const below = await next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const offered = offerChoice(below, NAME, placement, choice => <Button key={choice.key} plain label={choice.label} hotkey={choice.hotkey} onPress={() => {}} />)
+    if (!placement || placement.requestId != e.requestId) return offered
     const shown = await shownLimits($)
-    const { Box, Text } = $.ui.resolve(e)
     const columns = placement.columns > 0 ? placement.columns : e.props.bodyColumns
-    return (
-      <Box flexDirection="column">
-        {below}
-        <Box key={`cell:${NAME}`} flexDirection="column">
-          {shown.length == 0 ? <Text dimColor>No rate-limit reading yet.</Text> : await drawGauges($, e, shown, columns)}
-        </Box>
+    const cell = (
+      <Box key={`cell:${NAME}`} flexDirection="column">
+        {shown.length == 0 ? <Text dimColor>No rate-limit reading yet.</Text> : await drawGauges($, e, shown, columns)}
       </Box>
     )
+    return fillSlot(offered, NAME, cell) ?? <Box flexDirection="column">{offered}{cell}</Box>
   })
 }
