@@ -209,7 +209,9 @@ export const register: Register = on => {
 
   // pane-grid 의 grid pane: 빈 칸의 선택지에 이 mod 의 Button 을 더하고, 자기 칸이 이 pane 에 있으면 그 칸을 그린다(규약 §3.3 · §3.5).
   // pane-grid 보다 먼저 로드되면 fillSlot 이 pane-grid 가 그린 slot 을 채우고, 뒤에 로드되면 `cell:<이름>` Box 를 next(e) 뒤에 덧붙인다.
-  on('ui.render', { component: 'Pane', requestId: /^grid-/ }, async ($, e, next) => {
+  // matcher 에 plugin 이 없으면 Claude Code 2.1.325 부터 ui.render 의 plugin(= pane 을 연 plugin)이 이 hook 을 등록한 plugin 과 같을 때만 불린다.
+  // grid pane 은 pane-grid 가 열므로 `plugin: 'pane-grid'` 가 없으면 이 hook 이 grid pane 에 불리지 않는다.
+  on('ui.render', { component: 'Pane', requestId: /^grid-/, plugin: 'pane-grid' }, async ($, e, next) => {
     const placement = await readPlacement($, NAME)
     const below = await next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
